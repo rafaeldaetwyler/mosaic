@@ -2,13 +2,17 @@ import sys
 import os, os.path
 from PIL import Image, ImageOps
 from multiprocessing import Process, Queue, cpu_count
+import random as rd
 
-# Change these 3 config parameters to suit your needs...
-TILE_SIZE      = 50		# height/width of mosaic tiles in pixels
-TILE_MATCH_RES = 5		# tile matching resolution (higher values give better fit but require more processing)
-ENLARGEMENT    = 8		# the mosaic image will be this many times wider and taller than the original
+# Change these config parameters to suit your needs...
+TILE_SIZE         = 32		# height/width of mosaic tiles in pixels
+RAND_DISPLACEMENT = True	# whether to use random displacement of the tiles
+MAX_DISPLACEMENT  = 5		# maximal random displacement of tiles in pixels
+TILE_MATCH_RES    = 5		# tile matching resolution (higher values give better fit but require more processing)
+ENLARGEMENT       = 1		# the mosaic image will be this many times wider and taller than the original
 
 TILE_BLOCK_SIZE = TILE_SIZE / max(min(TILE_MATCH_RES, TILE_SIZE), 1)
+GRID_SIZE = max(TILE_SIZE - 2*MAX_DISPLACEMENT, 1) if RAND_DISPLACEMENT else TILE_SIZE
 WORKER_COUNT = max(cpu_count() - 1, 1)
 OUT_FILE = 'mosaic.jpeg'
 EOQ_VALUE = None
@@ -91,6 +95,8 @@ class TileFitter:
 		diff = 0
 		for i in range(len(t1)):
 			#diff += (abs(t1[i][0] - t2[i][0]) + abs(t1[i][1] - t2[i][1]) + abs(t1[i][2] - t2[i][2]))
+			if i >= len(t2):
+				return diff
 			diff += ((t1[i][0] - t2[i][0])**2 + (t1[i][1] - t2[i][1])**2 + (t1[i][2] - t2[i][2])**2)
 			if diff > bail_out_value:
 				# we know already that this isn't going to be the best fit, so no point continuing with this tile
@@ -141,8 +147,8 @@ class ProgressCounter:
 class MosaicImage:
 	def __init__(self, original_img):
 		self.image = Image.new(original_img.mode, original_img.size)
-		self.x_tile_count = int(original_img.size[0] / TILE_SIZE)
-		self.y_tile_count = int(original_img.size[1] / TILE_SIZE)
+		self.x_tile_count = int(original_img.size[0] / GRID_SIZE)
+		self.y_tile_count = int(original_img.size[1] / GRID_SIZE)
 		self.total_tiles  = self.x_tile_count * self.y_tile_count
 
 	def add_tile(self, tile_data, coords):
@@ -199,8 +205,12 @@ def compose(original_img, tiles):
 		progress = ProgressCounter(mosaic.x_tile_count * mosaic.y_tile_count)
 		for x in range(mosaic.x_tile_count):
 			for y in range(mosaic.y_tile_count):
-				large_box = (x * TILE_SIZE, y * TILE_SIZE, (x + 1) * TILE_SIZE, (y + 1) * TILE_SIZE)
-				small_box = (x * TILE_SIZE/TILE_BLOCK_SIZE, y * TILE_SIZE/TILE_BLOCK_SIZE, (x + 1) * TILE_SIZE/TILE_BLOCK_SIZE, (y + 1) * TILE_SIZE/TILE_BLOCK_SIZE)
+				rd_disp = [rd.randint(-MAX_DISPLACEMENT, MAX_DISPLACEMENT) for _ in [0,0]] if RAND_DISPLACEMENT else [0, 0]
+				x0 = x * GRID_SIZE + rd_disp[0]
+				y0 = y * GRID_SIZE + rd_disp[1]
+				large_box = (x0, y0, x0 + TILE_SIZE, y0 + TILE_SIZE)
+				small_box = (x0/TILE_BLOCK_SIZE, y0/TILE_BLOCK_SIZE,
+					(x0 + TILE_SIZE)/TILE_BLOCK_SIZE, (y0 + TILE_SIZE)/TILE_BLOCK_SIZE)
 				work_queue.put((list(original_img_small.crop(small_box).getdata()), large_box))
 				progress.update()
 
